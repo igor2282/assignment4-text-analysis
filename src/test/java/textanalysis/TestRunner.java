@@ -10,6 +10,8 @@ import textanalysis.matching.KMPMatcher;
 import textanalysis.matching.NaiveMatcher;
 import textanalysis.matching.RabinKarpMatcher;
 import textanalysis.matching.StringMatcher;
+import textanalysis.suffix.KasaiLCP;
+import textanalysis.suffix.SuffixArrayBuilder;
 import textanalysis.util.RandomStrings;
 
 public final class TestRunner {
@@ -28,6 +30,7 @@ public final class TestRunner {
         stringMatchingTests();
         rabinKarpCollisionTests();
         randomizedMatchingTests();
+        kasaiTests();
         System.out.println();
         System.out.printf("Total: %d passed, %d failed%n", passed, failed);
         if (failed > 0) {
@@ -178,6 +181,38 @@ public final class TestRunner {
         check("500 random text/pattern pairs, all matchers equal the oracle", true, allAgree);
     }
 
+    private static void kasaiTests() {
+        section("Kasai LCP");
+        KasaiLCP kasai = new KasaiLCP();
+        int[] bananaSa = {5, 3, 1, 0, 4, 2};
+        int[] bananaLcp = {0, 1, 3, 0, 0, 2};
+        check("banana: suffix array builder matches manual SA", Arrays.toString(bananaSa), Arrays.toString(SuffixArrayBuilder.build("banana")));
+        check("banana: LCP from manual SA", Arrays.toString(bananaLcp), Arrays.toString(kasai.build("banana", bananaSa)));
+        int[] mississippiSa = {10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2};
+        int[] mississippiLcp = {0, 1, 1, 4, 0, 0, 1, 0, 2, 1, 3};
+        check("mississippi: suffix array builder matches manual SA", Arrays.toString(mississippiSa), Arrays.toString(SuffixArrayBuilder.build("mississippi")));
+        check("mississippi: LCP from manual SA", Arrays.toString(mississippiLcp), Arrays.toString(kasai.build("mississippi", mississippiSa)));
+        check("single character", "[0]", Arrays.toString(kasai.build("a", new int[] {0})));
+        check("empty string", "[]", Arrays.toString(kasai.build("", new int[0])));
+        check("aaaa", "[0, 1, 2, 3]", Arrays.toString(kasai.build("aaaa", SuffixArrayBuilder.build("aaaa"))));
+        check("rejects invalid suffix array", true, throwsIllegalArgument(() -> kasai.build("abc", new int[] {0, 0, 1})));
+        RandomStrings generator = new RandomStrings(3, "AB");
+        boolean allMatch = true;
+        boolean linear = true;
+        for (int i = 0; i < 200; i++) {
+            String s = generator.next(1 + generator.nextInt(80));
+            int[] sa = SuffixArrayBuilder.build(s);
+            int[] lcp = kasai.build(s, sa);
+            if (!Arrays.equals(lcp, bruteForceLcp(s, sa))) {
+                allMatch = false;
+            }
+            if (kasai.getComparisons() > 3L * s.length()) {
+                linear = false;
+            }
+        }
+        check("200 random strings agree with brute-force LCP", true, allMatch);
+        check("character comparisons never exceed 3n", true, linear);
+    }
 
     private static int bruteForceLcs(String a, String b) {
         int best = 0;
@@ -205,7 +240,26 @@ public final class TestRunner {
         return i == small.length();
     }
 
+    private static int[] bruteForceLcp(String s, int[] sa) {
+        int[] lcp = new int[sa.length];
+        for (int i = 1; i < sa.length; i++) {
+            int k = 0;
+            while (sa[i] + k < s.length() && sa[i - 1] + k < s.length() && s.charAt(sa[i] + k) == s.charAt(sa[i - 1] + k)) {
+                k++;
+            }
+            lcp[i] = k;
+        }
+        return lcp;
+    }
 
+    private static boolean throwsIllegalArgument(Runnable action) {
+        try {
+            action.run();
+            return false;
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+    }
 
     private static void section(String name) {
         currentSection = name;
