@@ -1,8 +1,15 @@
 package textanalysis;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import textanalysis.dp.EditDistance;
 import textanalysis.dp.LongestCommonSubsequence;
+import textanalysis.matching.KMPMatcher;
+import textanalysis.matching.NaiveMatcher;
+import textanalysis.matching.RabinKarpMatcher;
+import textanalysis.matching.StringMatcher;
 import textanalysis.util.RandomStrings;
 
 public final class TestRunner {
@@ -17,6 +24,10 @@ public final class TestRunner {
     public static void main(String[] args) {
         lcsTests();
         editDistanceTests();
+        lpsTests();
+        stringMatchingTests();
+        rabinKarpCollisionTests();
+        randomizedMatchingTests();
         System.out.println();
         System.out.printf("Total: %d passed, %d failed%n", passed, failed);
         if (failed > 0) {
@@ -90,10 +101,82 @@ public final class TestRunner {
         check("300 random pairs respect |n-m| <= d <= min(max(n,m), n+m-2*LCS)", true, bounds);
     }
 
+    private static void lpsTests() {
+        section("KMP LPS table");
+        KMPMatcher kmp = new KMPMatcher();
+        check("AABAACAABAA", "[0, 1, 0, 1, 2, 0, 1, 2, 3, 4, 5]", Arrays.toString(kmp.buildLps("AABAACAABAA")));
+        check("ABABCABAB", "[0, 0, 1, 2, 0, 1, 2, 3, 4]", Arrays.toString(kmp.buildLps("ABABCABAB")));
+        check("AAAA", "[0, 1, 2, 3]", Arrays.toString(kmp.buildLps("AAAA")));
+        check("ABCD", "[0, 0, 0, 0]", Arrays.toString(kmp.buildLps("ABCD")));
+    }
 
+    private static void stringMatchingTests() {
+        section("String matching (Naive, KMP, Rabin-Karp agree)");
+        matchCase("pattern at the beginning", "abcxyzxyz", "abc", List.of(0));
+        matchCase("pattern in the middle", "xxxabcxxx", "abc", List.of(3));
+        matchCase("pattern at the end", "xyzxyzabc", "abc", List.of(6));
+        matchCase("multiple occurrences", "abcxabcxabc", "abc", List.of(0, 4, 8));
+        matchCase("overlapping occurrences", "aaaaa", "aa", List.of(0, 1, 2, 3));
+        matchCase("overlapping periodic pattern", "abababab", "abab", List.of(0, 2, 4));
+        matchCase("pattern absent", "abcdefgh", "xyz", List.of());
+        matchCase("pattern longer than text", "abc", "abcdef", List.of());
+        matchCase("empty pattern", "abc", "", List.of());
+        matchCase("empty text and empty pattern", "", "", List.of());
+        matchCase("empty text", "", "a", List.of());
+        matchCase("pattern equals text", "pattern", "pattern", List.of(0));
+        matchCase("single character pattern", "banana", "a", List.of(1, 3, 5));
+        matchCase("near miss at the end", "aaaaaaab", "aab", List.of(5));
+    }
 
+    private static void matchCase(String name, String text, String pattern, List<Integer> expected) {
+        List<StringMatcher> matchers = List.of(new NaiveMatcher(), new KMPMatcher(), new RabinKarpMatcher());
+        List<List<Integer>> results = new ArrayList<>();
+        for (StringMatcher matcher : matchers) {
+            results.add(matcher.search(text, pattern));
+        }
+        boolean agree = results.get(0).equals(results.get(1)) && results.get(1).equals(results.get(2));
+        check(name + " -> " + expected, true, agree && results.get(0).equals(expected));
+    }
 
+    private static void rabinKarpCollisionTests() {
+        section("Rabin-Karp hash collisions");
+        RabinKarpMatcher tiny = new RabinKarpMatcher(256, 3);
+        NaiveMatcher naive = new NaiveMatcher();
+        RandomStrings generator = new RandomStrings(5, "ACGT");
+        String text = generator.next(2_000);
+        String pattern = text.substring(700, 708);
+        List<Integer> expected = naive.search(text, pattern);
+        List<Integer> actual = tiny.search(text, pattern);
+        check("modulus 3 still returns the correct occurrences", expected, actual);
+        check("modulus 3 produces spurious hash hits", true, tiny.getHashCollisions() > 0);
+        check("hash hits = true matches + collisions", tiny.getHashHits(), actual.size() + tiny.getHashCollisions());
+        RabinKarpMatcher large = new RabinKarpMatcher();
+        large.search(text, pattern);
+        check("large modulus has far fewer collisions", true, large.getHashCollisions() < tiny.getHashCollisions());
+    }
 
+    private static void randomizedMatchingTests() {
+        section("Randomized cross-check");
+        RandomStrings generator = new RandomStrings(99, "AB");
+        List<StringMatcher> matchers = List.of(new NaiveMatcher(), new KMPMatcher(), new RabinKarpMatcher(), new RabinKarpMatcher(31, 7));
+        boolean allAgree = true;
+        for (int i = 0; i < 500; i++) {
+            String text = generator.next(generator.nextInt(60));
+            String pattern = generator.next(1 + generator.nextInt(6));
+            List<Integer> oracle = new ArrayList<>();
+            for (int s = 0; s + pattern.length() <= text.length(); s++) {
+                if (text.startsWith(pattern, s)) {
+                    oracle.add(s);
+                }
+            }
+            for (StringMatcher matcher : matchers) {
+                if (!matcher.search(text, pattern).equals(oracle)) {
+                    allAgree = false;
+                }
+            }
+        }
+        check("500 random text/pattern pairs, all matchers equal the oracle", true, allAgree);
+    }
 
 
     private static int bruteForceLcs(String a, String b) {
